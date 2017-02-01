@@ -4,12 +4,32 @@ apply plugin: 'com.github.kt3k.coveralls'
 apply plugin: 'maven'
 apply plugin: 'maven-publish'
 apply plugin: 'org.ajoberstar.github-pages'
+apply plugin: 'signing'
 
 sourceCompatibility = 1.8
 
-group = 'pl.zientarski'
+group = 'com.github.topikachu'
 version = '0.0.1'
 description = 'Java to JSON Schema v.4 mapper'
+ext.packaging = 'jar'
+
+def isDevBuild
+def isCiBuild
+def isReleaseBuild
+
+def sonatypeRepositoryUrl
+
+//set build variables based on build type (release, continuous integration, development)
+if(hasProperty("release")) {
+    isReleaseBuild = true
+    sonatypeRepositoryUrl = "https://oss.sonatype.org/service/local/staging/deploy/maven2/"
+} else if (hasProperty("ci")) {
+    isCiBuild = true
+    version += "-SNAPSHOT"
+    sonatypeRepositoryUrl = "https://oss.sonatype.org/content/repositories/snapshots/"
+} else {
+    isDevBuild = true
+}
 
 repositories {
     mavenCentral()
@@ -41,40 +61,94 @@ jacocoTestReport {
 	}
 }
 
-task sourceJar(type: Jar) {
-	from sourceSets.main.allJava
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    classifier = 'javadoc'
+    from tasks.javadoc.destinationDir
 }
 
-publishing {
-	publications {
-		mavenJava(MavenPublication) {
-			from components.java
+task sourcesJar(type: Jar) {
+    from sourceSets.main.allSource
+    classifier = 'sources'
+}
 
-			// providedCompile -> provided scope
-			pom.withXml {
-				asNode().dependencies.'*'.findAll() {
-					it.scope.text() == 'runtime'  && project.configurations.compile.allDependencies.find { dep ->
-						dep.name == it.artifactId.text()
-					}
-				}.each() {
-					it.scope*.value = 'compile'
-				}
-			}
+artifacts {
+    archives jar
 
-			artifact sourceJar {
-				classifier "sources"
-			}
-		}
-	}
-	repositories {
-		maven {
-			url "$buildDir/repo"
-		}
-	}
+    archives javadocJar
+    archives sourcesJar
+}
+
+task wrapper(type: Wrapper) {
+    group = 'Buildmaster'
+    description = 'Generates gradlew and gradlew.bat bootstrap scripts'
+    gradleVersion = '2.5'
+}
+
+//********* artifact signing *********
+if(isReleaseBuild) {
+    signing {
+        sign configurations.archives
+    }
+} else {
+    task signArchives {
+        // do nothing
+    }
+}
+
+uploadArchives {
+    repositories {
+        if (isDevBuild) {
+            mavenLocal()
+        }
+        else {
+            mavenDeployer {
+                if(isReleaseBuild) {
+                    beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+                }
+
+                repository(url: sonatypeRepositoryUrl) {
+                    authentication(userName: sonatypeUsername, password: sonatypePassword)
+                }
+
+                pom.project {
+                    name 'JSONschema4-mapper'
+                    packaging 'jar'
+                    description 'The goal of this project is to provide comprehensive, feature-complete and well-tested mapper from Java classes to JSON schema format.'
+                    url 'https://github.com/topikachu/JSONschema4-mapper'
+
+                    scm {
+                        url 'scm:git@github.com:topikachu/JSONschema4-mapper.git'
+                        connection 'scm:git@github.com:topikachu/JSONschema4-mapper.git'
+                        developerConnection 'scm:git@github.com:topikachu/JSONschema4-mapper.git'
+                    }
+
+                    licenses {
+                        license {
+                            name 'The Apache Software License, Version 2.0'
+                            url 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                            distribution 'repo'
+                        }
+                    }
+
+                    developers {
+                        developer {
+                            id 'wodzuu'
+                            name 'Maciej Zientarski'
+                        }
+                        developer {
+                            id 'topikachu'
+                            name 'Gong Yi'
+                        }
+
+                    }
+                }
+            }
+        }
+    }
 }
 
 githubPages {
-	repoUri = 'https://github.com/wodzuu/JSONschema4-mapper.git'
+	repoUri = 'https://github.com/topikachu/JSONschema4-mapper'
 	targetBranch = 'mvn-repo'
 	commitMessage = 'development release'
 	pages {
